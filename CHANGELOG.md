@@ -29,9 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+### Fixed
 
-- No unreleased changes yet.
+- Fixed tab completion regression where multiple candidates sharing a prefix would fail to auto-complete, the screen could blank with stale PTY echo state, or stale completions would still be reported when only one match remained. The PTY layer now drains stale control-pipe events before issuing a `__aish_complete` query, `CommandState::take_submission` no longer lets a `PromptReady{command_seq:None}` event steal a backend submission registered with a seq, and bash's `_aish_resolve_compreply` no longer prepends a spurious `./` to bare filename completions.
 
 ## [0.3.3] - 2026-06-03
 

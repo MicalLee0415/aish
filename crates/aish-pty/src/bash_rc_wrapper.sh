@@ -365,9 +365,11 @@ _aish_resolve_compreply() {
         dir="${cur%/*}/"
     elif [[ -n "$cur" && -d "$cur" ]]; then
         dir="${cur}/"
-    else
-        dir="./"
     fi
+    # Issue #207: when `cur` is a bare filename without `/` and is not an
+    # existing directory, return the bare item without prepending `./`.
+    # Prepending `./` would have rustyline insert `cd ./Documents/` instead
+    # of `cd Documents/`, breaking the user's command.
     printf '%s' "${dir}${item}"
 }
 

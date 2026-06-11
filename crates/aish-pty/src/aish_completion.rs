@@ -37,6 +37,12 @@ impl PersistentPty {
             super::shell_quote_escape(line)
         );
 
+        // Issue #207: drain any stale control-pipe events left over from
+        // `forward_readline_tab`'s `set -o emacs` / `set +o emacs; set +o vi`
+        // probes.  A stale `PromptReady{command_seq:null}` would otherwise be
+        // matched against the freshly-registered `__aish_complete` submission
+        // and cause the wait loop to break early with `completion = None`.
+        self.drain_control_pipe_raw();
         self.exec_buffer.lock().unwrap().clear();
         self.exec_mode.store(true, Ordering::SeqCst);
         self.send_command(&cmd, Some(seq))?;

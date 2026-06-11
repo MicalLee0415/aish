@@ -179,8 +179,21 @@ impl CommandState {
                 }
                 return Some(sub);
             }
+            return None;
         }
-        self.active_submission.take()
+        // Issue #207 (defense in depth): a `PromptReady{command_seq:None}` event
+        // must only match a submission that was itself registered without a
+        // seq.  Before the fix, we would unconditionally take
+        // `active_submission`, which could be a backend submission registered
+        // with a seq — e.g. a freshly-registered `__aish_complete` — and
+        // cause `query_completions` to return early with an empty candidate
+        // list.  See `test_stale_prompt_ready_with_null_seq_does_not_consume_backend_submission`.
+        if let Some(active) = self.active_submission.as_ref() {
+            if active.command_seq.is_none() {
+                return self.active_submission.take();
+            }
+        }
+        None
     }
 }
 
@@ -312,5 +325,70 @@ mod tests {
         state.handle_event(&evt);
         // ssh is a session command — no error correction
         assert!(!state.can_correct_error());
+    }
+
+    /// Regression test for issue #207: a stale `PromptReady` with
+    /// `command_seq: None` (e.g. lingering from `forward_readline_tab`'s
+    /// `set -o emacs` / `set +o emacs; set +o vi` probes) must NOT consume
+    /// a backend command submission that was registered with a seq.
+    ///
+    /// Before the fix, `take_submission(None)` would always fall through
+    /// to `self.active_submission.take()`, stealing the backend
+    /// submission and causing `query_completions` to return an empty
+    /// candidate list (or even return prematurely with the wrong seq).
+    #[test]
+    fn test_stale_prompt_ready_with_null_seq_does_not_consume_backend_submission() {
+        let mut state = CommandState::new();
+        // Simulate `__aish_complete` registering a backend submission with seq=-5.
+        state.register_command("__aish_complete", CommandSource::Backend, Some(-5));
+
+        // Stale event from `set +o emacs; set +o vi` cleanup (no seq).
+        let stale = BackendControlEvent::PromptReady {
+            command_seq: None,
+            exit_code: 0,
+            cwd: "/home".to_string(),
+            interrupted: false,
+        };
+        let result = state.handle_event(&stale);
+        assert!(
+            result.is_none(),
+            "stale PromptReady{{command_seq:None}} must not match a backend submission \
+             registered with a seq; got {result:?}"
+        );
+
+        // The real completion result for the backend submission should still match.
+        let real = BackendControlEvent::PromptReady {
+            command_seq: Some(-5),
+            exit_code: 0,
+            cwd: "/home".to_string(),
+            interrupted: false,
+        };
+        let result = state.handle_event(&real);
+        assert!(
+            result.is_some(),
+            "real PromptReady{{command_seq:Some(-5)}} must still match the backend submission"
+        );
+        let r = result.unwrap();
+        assert_eq!(r.command_seq, Some(-5));
+        assert_eq!(r.command, "__aish_complete");
+    }
+
+    /// When the *active* submission is itself registered without a seq
+    /// (e.g. a user command), the `PromptReady{null}` event should still
+    /// match — this preserves the existing user-command path.
+    #[test]
+    fn test_prompt_ready_with_null_seq_still_matches_user_submission() {
+        let mut state = CommandState::new();
+        state.register_command("ls", CommandSource::User, None);
+
+        let evt = BackendControlEvent::PromptReady {
+            command_seq: None,
+            exit_code: 0,
+            cwd: "/home".to_string(),
+            interrupted: false,
+        };
+        let result = state.handle_event(&evt);
+        assert!(result.is_some(), "PromptReady{{null}} must still match a user submission");
+        assert_eq!(result.unwrap().command, "ls");
     }
 }
