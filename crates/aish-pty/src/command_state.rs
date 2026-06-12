@@ -388,7 +388,10 @@ mod tests {
             interrupted: false,
         };
         let result = state.handle_event(&evt);
-        assert!(result.is_some(), "PromptReady{{null}} must still match a user submission");
+        assert!(
+            result.is_some(),
+            "PromptReady{{null}} must still match a user submission"
+        );
         assert_eq!(result.unwrap().command, "ls");
     }
 }
